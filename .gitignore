@@ -1,0 +1,12 @@
+# Python virtual environment
+venv_ai/
+
+# Python cache files
+__pycache__/
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/

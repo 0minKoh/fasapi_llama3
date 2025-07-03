@@ -15,26 +15,47 @@ OLLAMA_MODEL = "llama3" # 사용할 Ollama 모델 이름 (llama3, llama3:70b 등
 app = FastAPI()
 
 # 요청 바디 정의
+from typing import List, Dict # List, Dict 타입 힌트를 위해 추가
 class PromptRequest(BaseModel):
     prompt: str
-    # Ollama API에 직접 전달할 추가 옵션 (선택 사항)
-    # https://ollama.com/docs/api/chat#parameters
+    rag_context: str = "" # RAG 컨텍스트를 받을 필드 추가
+    few_shot_examples: List[Dict[str, str]] = [] # Few-Shot 예시를 받을 리스트 다시 추가 (dict 형태로)
     temperature: float = 0.7
     top_p: float = 0.9
-    num_predict: int = 512 # max_new_tokens에 해당 (Ollama에서는 num_predict)
+    num_predict: int = 512
+
 
 # LLM 추론 API 엔드포인트
 @app.post("/generate/")
 async def generate_text(request: PromptRequest):
     async def generate_stream():
         try:
+            # Ollama API로 보낼 메시지 배열 구성
+            ollama_messages = [
+                {"role": "system", "content": (
+                    "당신은 수파자 AI 챗봇입니다. 모든 질문에는 반드시 한국어로 답변하세요. "
+                    "답변할 때에는 '참고', 'FAQ에 따르면' 등의 출처 표현을 사용하지 마세요. "
+                    "친절하고 정리된 형태로 줄바꿈을 적절히 활용하여 답변해야 합니다. "
+                    "다음은 사용자 질문과 관련된 추가 FAQ 정보입니다 (참고용):\\n"
+                    f"{request.rag_context}" # RAG 컨텍스트를 시스템 프롬프트 내에 포함
+                    "--------------------\\n"
+                    "이전 대화 예시 (아래 Few-Shot 예시)와 위 FAQ 정보를 참고하여 답변을 생성하세요. 단, 답변은 FAQ 답변과 매우 유사하게 꽤나 자세하고 친절하게 작성되어야 합니다. "
+                    "제공된 FAQ 정보와 이전 대화 예시에서 얻은 정보 외의 내용은 절대로 언급하지 마세요. "
+                    "만약 주어진 정보만으로는 사용자 질문에 답변할 수 없다면, 당신은 반드시 "
+                    "'잘 모르겠어요. 더 자세한 정보가 필요하시면 수파자 고객센터로 문의해주세요. 🙇‍♀️'라고만 답변해야 합니다. "
+                )},
+            ]
+
+            # Few-Shot 예시 메시지 추가
+            ollama_messages.extend(request.few_shot_examples) 
+
+            # 실제 사용자 질문 추가
+            ollama_messages.append({"role": "user", "content": request.prompt}) # request.prompt는 이제 순수한 사용자 질문
+
             # Ollama API로 보낼 데이터 구성 (stream: True로 설정)
             data = {
                 "model": OLLAMA_MODEL,
-                "messages": [
-                    {"role": "system", "content": "당신은 사용자의 문의사항에 답변하는 수파자 AI 챗봇입니다. 한국어로 답변하세요. 답변할 때에는 '참고', 'FAQ에 따르면' 등의 출처 표현을 사용하지 마세요. 적절한 이모지를 사용하여, 친절한 답변을 제공해야 합니다. 더불어, 답변은 정리된 형태로 제공해야 하며, 줄바꿈('\\n')을 적절하게 활용해야 합니다. "},
-                    {"role": "user", "content": f"{request.prompt} \n 최대한 FAQ 내의 '답변'과 유사한 형태로 답변하세요. response in 한국어."}
-                ],
+                "messages": ollama_messages,
                 "stream": True, # 스트리밍 활성화
                 "options": {
                     "temperature": request.temperature,
